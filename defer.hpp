@@ -2,9 +2,9 @@
 #define DEFER_CPP
 
 // A useful macro to get arbitrary code to execute at the end of a scope using RAII and lambdas.
-// This provides defer functionality similiar to golang. This is useful for interfacing 
-// with C APIs that need a "deinit" or "cleanup" function to be called at the end of scope. 
-// This creates code that is cleaner, because you don't need to create an RAII wrapper struct.
+// This provides defer syntax similiar to golang. This is useful for interfacing
+// with C APIs that need a "deinit" or "cleanup" function to be called at the end of scope.
+// This creates code that is cleaner because you don't need to create lots of RAII wrappers.
 
 // NOTE: These defer macros are assumed to be "noexcept."
 //       You are, of course, encouraged to change them to fit your needs if you want to use exceptions.
