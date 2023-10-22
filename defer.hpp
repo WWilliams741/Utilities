@@ -26,7 +26,7 @@ struct Defer {
 };
 #define GEN_DEFER_NAME_HACK(name, counter) name ## counter
 #define GEN_DEFER_NAME(name, counter) GEN_DEFER_NAME_HACK(name, counter)
-#define defer Defer GEN_DEFER_NAME(__defer__, __COUNTER__) = [&]() noexcept
+#define defer Defer GEN_DEFER_NAME(_defer_, __COUNTER__) = [&]() noexcept
 
 #else
 
@@ -40,7 +40,7 @@ struct Defer {
 struct Defer_Generator { template<typename Code> Defer<Code> operator +(Code code) noexcept { return Defer<Code>{code}; } };
 #define GEN_DEFER_NAME_HACK(name, counter) name ## counter
 #define GEN_DEFER_NAME(name, counter) GEN_DEFER_NAME_HACK(name, counter)
-#define defer auto GEN_DEFER_NAME(__defer__, __COUNTER__) = Defer_Generator{} + [&]() noexcept
+#define defer auto GEN_DEFER_NAME(_defer_, __COUNTER__) = Defer_Generator{} + [&]() noexcept
 
 #endif
 
