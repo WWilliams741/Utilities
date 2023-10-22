@@ -6,8 +6,14 @@
 // with C APIs that need a "deinit" or "cleanup" function to be called at the end of scope.
 // This creates code that is cleaner because you don't need to create lots of RAII wrappers.
 
-// NOTE: These defer macros are assumed to be "noexcept."
-//       You are, of course, encouraged to change them to fit your needs if you want to use exceptions.
+// NOTE: The defer macro is assumed to be "noexcept" by default.
+//       #define DEFER_WITH_EXCEPTIONS above "defer.hpp" to allow exceptions to be thrown
+//       inside defer statements (although I would highly advise against it)
+#ifdef DEFER_WITH_EXCEPTIONS
+#define DEFER_NOEXCEPT noexcept(false)
+#else
+#define DEFER_NOEXCEPT noexcept(true)
+#endif
 
 #if __cplusplus >= 201703L
 
@@ -15,18 +21,18 @@
 template<typename Code>
 struct Defer {
     Code code;
-// constexpr support for C++20 and higher:
+// constexpr support (>= C++20):
 #if __cplusplus >= 202002L
-    constexpr Defer(Code block) noexcept : code(block) {}
-    constexpr ~Defer() noexcept { code(); }
+    constexpr Defer(Code block) DEFER_NOEXCEPT : code(block) {}
+    constexpr ~Defer() DEFER_NOEXCEPT { code(); }
 #else
-    Defer(Code block) noexcept : code(block) {}
-    ~Defer() noexcept { code(); }
+    Defer(Code block) DEFER_NOEXCEPT : code(block) {}
+    ~Defer() DEFER_NOEXCEPT { code(); }
 #endif
 };
 #define GEN_DEFER_NAME_HACK(name, counter) name ## counter
 #define GEN_DEFER_NAME(name, counter) GEN_DEFER_NAME_HACK(name, counter)
-#define defer Defer GEN_DEFER_NAME(_defer_, __COUNTER__) = [&]() noexcept
+#define defer Defer GEN_DEFER_NAME(_defer_, __COUNTER__) = [&]() DEFER_NOEXCEPT
 
 #else
 
@@ -34,13 +40,13 @@ struct Defer {
 template<typename Code>
 struct Defer {
     Code code;
-    Defer(Code block) noexcept : code(block) {}
-    ~Defer() noexcept { code(); }
+    Defer(Code block) DEFER_NOEXCEPT : code(block) {}
+    ~Defer() DEFER_NOEXCEPT { code(); }
 };
-struct Defer_Generator { template<typename Code> Defer<Code> operator +(Code code) noexcept { return Defer<Code>{code}; } };
+struct Defer_Generator { template<typename Code> Defer<Code> operator +(Code code) DEFER_NOEXCEPT { return Defer<Code>{code}; } };
 #define GEN_DEFER_NAME_HACK(name, counter) name ## counter
 #define GEN_DEFER_NAME(name, counter) GEN_DEFER_NAME_HACK(name, counter)
-#define defer auto GEN_DEFER_NAME(_defer_, __COUNTER__) = Defer_Generator{} + [&]() noexcept
+#define defer auto GEN_DEFER_NAME(_defer_, __COUNTER__) = Defer_Generator{} + [&]() DEFER_NOEXCEPT
 
 #endif
 
