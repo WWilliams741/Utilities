@@ -7,6 +7,6 @@ This example also includes an explanation of how to implement a unique "garbage 
 You can run this experiment by typing `docker compose up -d`, then go into the docker image using `docker exec -it jai_language_concepts_in_cpp /bin/bash`, `cd` into `dev` and run `./build.sh`. This will produce your executable inside of `.build` folder. Then, run it with `.build/main`
 
 # Supplemental materials:
+- Jonathan Blow's  explanation of why most languages [get it wrong](https://github.com/WWilliams741/Utilities/blob/main/jai_langauge_concepts_in_cpp/Jonathan_Blow_on_memory_management_in_Jai.txt)
 - Casey Muratori's explanation of why most languages [get it wrong](https://www.youtube.com/watch?v=f4ioc8-lDc0&t=4406s)
 - Ginger Bill's    explanation of why most languages [get it wrong](https://www.gingerbill.org/article/2020/06/21/the-ownership-semantics-flaw/)
-- Jonathan Blow's  explanation of why most languages [get it wrong](https://github.com/WWilliams741/Utilities/blob/main/jai_langauge_concepts_in_cpp/Jonathan_Blow_on_memory_management_in_Jai.txt)
