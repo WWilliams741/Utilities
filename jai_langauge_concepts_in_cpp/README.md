@@ -8,4 +8,5 @@ You can run this experiment by typing `docker compose up -d`, then go into the d
 
 # Supplemental materials:
 - Casey Muratori's explanation of why most languages [get it wrong](https://www.youtube.com/watch?v=f4ioc8-lDc0&t=4406s)
-- Ginger Bill's explanation of why most languages [get it wrong](https://www.gingerbill.org/article/2020/06/21/the-ownership-semantics-flaw/)
+- Ginger Bill's    explanation of why most languages [get it wrong](https://www.gingerbill.org/article/2020/06/21/the-ownership-semantics-flaw/)
+- Jonathan Blow's  explanation of why most languages [get it wrong](https://github.com/WWilliams741/Utilities/blob/main/jai_langauge_concepts_in_cpp/Jonathan_Blow_on_memory_management_in_Jai.txt)

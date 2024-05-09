@@ -1,0 +1,996 @@
+/*
+
+The ultimate goal of this file is to explain the way this language is designed
+with regard to memory management: what kinds of patterns of use it is meant
+to support, what it discourages, and so forth. 
+
+But the philosophy underlying these design decisions is
+pretty different than with most languages. So for these explanations to make sense,
+we need to explain why we feel the approaches made by most modern languages are wrong.
+
+
+I.
+
+When digital computers were first invented, they weren't even programmable
+in the way we think about programming today. They were built to solve specific
+classes of problems, [XXX an example here would be nice] and you could set some switches to control the inputs 
+to those problems.
+
+Eventually we invented computers that were generally programmable, by encoding
+the instructions as specific patterns of bits.
+This was a great breakthrough over what we had before;
+but, because these instructions operated at such a granular level,
+manipulating little pieces of state that were very small and particular,
+programming took a lot of effort and it was very easy to make mistakes,
+even for programs we'd consider simple today.
+
+So, sensibly, we looked for ways to program that would involve less drudge-work.
+We invented assembly language, which was "higher-level" than machine language
+in that you didn't have to remember the bit patterns for the various instructions;
+instead, you could use human-readable names. And you didn't have to count out
+how many bytes away the destination of a jump instruction needed to travel (and
+change this number every time you changed the code!) -- instead, you could
+give the target of the jump a name, and just jump to that name. A program
+called the assembler would convert these names to concrete values each time
+you assembled the program.
+
+Because this worked out so successfully, we looked for more ways to separate
+the programmer from the implementation details of the program. We invented
+languages like Fortran and eventually C. These languages automated the
+generation of assembly-language instructions for loops, procedure calls,
+and (in the case of C), maintaining a call stack so that you could
+implement recursive algorithms without thinking very hard. In these
+cases, a little bit of runtime performance was sacrificed, but you were
+always supposed to at least basically know what your program compiled into
+on the target machine, i.e. the distance in performance between your C program
+and the assembly program you *would* have written instead was in theory 
+not too big, most of the time.
+
+Programming in Fortran or C, we could make programs that were much more sophisticated,
+in much less time, than we had been able to before; and modifying these programs
+took a great deal less effort.
+
+Lisp took a much bigger leap away from the machine's implementation details than
+did languages like C. Lisp was always painfully slow and sometimes hard to use, 
+but some people swore it was the future of programming.
+
+Because this pattern, of going even-higher-level, continued to be successful,
+we kept looking for ever-more-abstracted language ideas to continue the trend -- 
+both in the realm of compiled languages like C, and in accelerating
+traditionally interpreted languages like Lisp, or in new functional-ish languages 
+that would extend the tradition of Lisp into new territory. 
+
+So we got languages like Smalltalk and C++ and Java, and eventually C# and Python
+and Javascript and so Forth. These languages were all attempts to continue the
+successful pattern of distancing one's self from implementation details of the machine,
+which obviously would continue to be a good idea.
+
+But, somewhere between 1970 and 2020, this pattern of success failed to replicate,
+but it took people a while to notice (actually, most programmers still haven't noticed).
+Sometimes the direction we attempt to extrapolate a trend ends up being
+the wrong one, and we end up in the middle of some field somewhere.
+
+
+II.
+
+To go into full detail about what went wrong is impossible to do here, since each 
+individual wrong path could have many books written about it. We'll just mention a few
+here that we build on later. We'll have the most to say about C++, since that is the language
+that was being used daily, by the designer of this language, for a long time;
+many design choices in this language are heavily informed by these decades of C++ use.
+
+C++ wanted to make things simpler and easier to program by packaging procedures and
+data together as "objects". The idea was that you can use the object as an abstraction
+barrier: the author of the application that uses an object doesn't need to know anything
+about the code inside the object; he can just use it as a black box.
+
+You also, in theory, didn't need to know anything about the memory inside that black box;
+you "construct" the object and it sets up its initial state; you use it, and it just
+does a bunch of memory operations and whatever else; then you "destruct" it, and it
+cleans up all the memory.
+
+The C++ ideal is for just about everything to be an object; and for objects to manage
+their own storage; and for extra convenience, allocation of the memory holding the
+base of the object itself, and the calling of the constructor, are both wrapped
+together by the operator "new", so that when you say "new Object();" you do everything
+necessary to make usable object without having to think any further, and you get back
+a pointer to this object.
+
+That thing about the pointer is not very good; in fact, today, in 2020, repeated
+use of this kind of pattern is likely to make your program slow. A fully vigorous
+implementation of the idea of C++'s style of "object-oriented" programming,
+with many objects that don't know anything concrete about each other, is likely
+to be very slow. But again, it took a long time for people to notice this
+(most programmers still haven't).
+
+This idea of instantiating many individual objects in memory was bolstered by
+the legacy of Lisp and the way algorithms were taught in computer science
+schools, and fed back into those ideas in turn; it was just the water that all
+the fish were swimming in. You make lots of trees, lists, or other kinds of data structures; 
+these data structures all consist of nodes, the memory for which is allocated from 
+a general heap and can be freed individually at any time. And if you're in C++
+or C# or another "object-oriented" language, when you allocate or deallocate
+all these nodes, arbitrarily complex code may run (with corresponding worries
+about performance or dependencies between that code and your outer application).
+
+
+III.
+
+Today, computers are very different than they were in 1970. Now they have tremendously fast
+CPUs and huge amounts of available memory. However, relatively speaking, the CPU
+is much faster than the memory. At the time of this writing, it is not uncommon
+for a CPU, if it has to fetch a value from RAM that is not already available,
+to have to wait 500 cycles for the value to arrive -- which, on a CPU that can
+do multiple instructions per clock, means the lost opportunity to do a couple
+of thousand basic operations. It is very very common for programs to stall
+for thousands of operations just to read the value of one integer from memory.
+
+CPUs try to mitigate this expense with multiple levels of memory caches; some
+caches are very small and close to the CPU, and thus are very fast; but 
+bigger caches are necessarily further from the CPU and take correspondingly
+longer to read.
+
+Modern CPUs expend heroic effort to predict which memory your program
+will want, in advance, so that it can have that memory in a fast cache
+before you need it. When this prediction succeeds, your program blazes along;
+when this prediction fails, your program grinds to a halt for a bit,
+waiting for that memory to arrive.
+
+Because the penalty for failure is so high, the performance of most programs
+today is largely determined by the degree to which they do not "miss the cache"
+(try to read memory that the CPU didn't know in advance that they would want).
+This is very different from the olden days, when the number of instructions
+that were executed determined the speed of the program.
+
+(The situation gets even worse when multiple CPUs want to read and write
+to the same area of memory, but we'll save that discussion for another time.)
+
+The problem with these random-allocation ways of writing programs, as
+encouraged by Computer Science School, by Lisp, and by "object-oriented" paradigms,
+is that they make it very hard for the CPU to know in advance what memory
+you will need. Imagine you have a linked list that is three nodes long,
+you have the first node in cache, and you want to get at the data inside
+the third node:
+
+           #1              #2              #3
+        [POINTER] ----> [POINTER] ----> [POINTER]
+        [ value ]       [ value ]       [ value ]
+
+To know the value in #3, you need to read the pointer in #2. But #2 is not
+in cache, so you need to follow the pointer in #1, to know where #2 is. 
+Your code looks like:
+
+    (a) Dereference 'POINTER' of #1 to get the memory of #2.
+    (b) Dereference 'POINTER' of #2 to get the memory of #3.
+    (c) Read 'value' of #3.
+
+Step (a) takes a long time, because #2 was not in the cache. Step (b) then
+takes a long time, because #3 was not in the cache.
+
+But wait, can't this be sped up by all that prediction work the CPU is doing?
+Not really. The problem is, there is no way to know in advance
+which memory to fetch for #3 ... it depends, after all, on the POINTER
+of #2, which will take time to retrieve. We don't know we want #2 until
+we decide to follow POINTER of #1. We may be able to predict that part,
+and start pulling #2 into cache before our CPU's program counter
+reaches the instruction for (a); but there's no way to predict (b)
+until #2 is actually in memory, and that takes a really long time.
+
+This seems like a very niche example, reading two links forward
+in a linked-list; but in fact Lisp programs do much worse than this 
+with great regularity, and "object-oriented" programs create equivalent
+situations (and much worse) by following pointers between objects all 
+the time.
+
+For some analogies to help you understand the magnitudes of the speed
+differences, see:
+
+    https://blog.codinghorror.com/the-infinite-space-between-words/
+
+For a demo that shows you the difference between reaction speeds of different
+caches relative to main memory, slowed down to human scale, see:
+
+    https://web.archive.org/web/20230123172545/http://overbyte.com.au/misc/Lesson3/CacheFun.html
+
+
+IV.
+
+So, one of the ideas that underlies most modern programming languages is
+"The programmer shouldn't have to manually manage memory; the runtime system
+can do this automatically, freeing the programmer's mind to do more
+important things."
+
+But we have seen that this can be extremely costly on modern computers,
+and often this expense is invisible to the programmer; the performance
+no longer maps cleanly to an equivalent assembly program like it did
+in 1970.
+
+These modern languages mostly agree that memory should be automatically
+managed by the system, but they have different ideas about how this
+should happen. C++ and other "object-oriented"
+languages fold allocations behind abstraction barriers; Lisp descendants
+use a garbage collector so that you "never have to worry" about freeing memory;
+Swift and whatever else use ARC, "automated reference counting", which 
+stores a number on every node, freeing the memory when the number reaches 0.
+
+All these approaches have different kinds of performance problems, but
+they all share one thing in common: they encourage you to think of your data
+as a bunch of separately-allocated nodes. But that is exactly the slowest
+thing you can do, today in the year 2020!
+
+But this is the way most people have been taught to program; they don't
+even think twice about it!
+
+If that's slow, what's fast? One example of an easy thing for your CPU to predict
+is iteration over some array. Suppose we have an array of some data structures:
+
+           #1              #2              #3
+        [ float ]       [ float ]       [ float ]
+        [string ]       [string ]       [string ]     ...
+        [integer]       [integer]       [integer]
+
+and you're iterating over this array, in a 'for' loop, and looking at each node.
+The CPU will notice that you are viewing memory in a linear pattern and fetch
+future pages of that memory into cache. So this kind of iteration will be
+very fast on modern CPUs.
+
+Something that looks similar, but is much worse for performance, happens
+when you introduce pointers again. A lot of languages, like Java, want most
+everything to be an "object", and to refer to all objects through pointers.
+So an array in one of these languages would look like: 
+
+           #1              #2              #3
+        [POINTER1]      [POINTER2]      [POINTER3]
+            \              /                 \
+             \  -----------                   \
+              \                                -----------------------------------\
+            /  \------------------\                                                \
+            |                      \                                               |
+        [ float ]   [ JUNK. ]   [ float ]   [ JUNK. ]   [ JUNK. ]   [ JUNK. ]   [ float ]
+        [string ]   [ JUNK. ]   [string ]   [ JUNK. ]   [ JUNK. ]   [ JUNK. ]   [string ]     ...
+        [integer]   [ JUNK. ]   [integer]   [ JUNK. ]   [ JUNK. ]   [ JUNK. ]   [integer]
+
+
+The pointers are packed together in an array, but they point at things that are stored
+sparsely in memory. But, this being a modern computer, the actual values you care about (float, string, integer)
+can be tremendously much further apart from each other than we can draw in a diagram like this;
+and if the array contains many elements, the values in memory could be pathologically more scrambled.
+The CPU can try to prefetch these (since it can at least see all 
+the POINTERs in the toplevel array), so it at least doesn't have the kind of 
+double-dereference dependency we had in the linked-list examples, but, the prefetching
+is going to be very inefficient because a lot of JUNK data is pulled into the cache,
+and this wastes valuable space we'd rather have devoted to the data we want to actually read.
+
+So, as it happens, memory layout is actually pretty important! By choosing not to think about
+memory, you are paying a tremendous amount of performance.
+
+Performance isn't the only problem -- these techniques introduced by some of these languages
+also make your code more complicated and harder to understand.
+
+
+V.
+
+Wait, what? Doesn't it make it easier to program if you don't have to think about memory?
+
+The problem is, when trying to make a black box, with everything hidden neatly inside
+so that the programmer doesn't have to think about resources like memory in any way,
+well, it never works out that way. The stuff you are trying to cram into the box never
+quite fits into the box. You can get pretty close if you are free to choose the shape
+and weight of the box in order to fit the functionality that goes inside; but the problem
+with languages like C++ is that they prescribe boxes of uniform shape and weight, and
+you're supposed to build your program out of those boxes.
+
+In order to abstract away concerns like memory use, C++ came up with the Rule of Three,
+which says that for every single kind of object you program, you must make at least
+three functions that are capable of constructing, copying, and destructing that object.
+Then C++ got even more complicated and it became the Rule of Five, or maybe even Seven;
+one thing you'll notice about these programming paradigms is that the numbers
+only ever go up.
+
+Is it bad to have 3, 5, or 7 functions per object? Well, someone has to write those
+functions. That takes engineering time. And they have to be compiled every time you press
+the compile button, which takes time; if most of them are not really necessary, you could
+be saving a significant portion of your compile time.
+
+As time goes on and you have more objects, you end up in a weird place where a large
+percentage of your code seems to be doing bureaucratic things having to do with
+constructing, copying, and destructing, with very little actual work being done.
+(By "actual work" I mean some computation that does not constitute overhead or is
+not about maintaining the structure of your program, but, that directly speaks
+to the answer you want to compute and output).
+
+Because all these object methods are supposed to treat other objects as black boxes
+about which they know nothing, you end up in a situation where you aren't allowed
+to assume things that would make your life easier, but that actually are probably 
+true. So you end up writing a bunch of code that is about pretending that you don't
+really know what is actually happening.  [XXX There is probably a better way of explaining this].
+
+Then, eventually, you have to deal with OOP's misconceptions about what abstractions
+actually are. Abstraction is often good, because it reduces the number of details you
+need to think about at any given time; but it's really a temporary reprieve, in the
+sense that, if you live with a code base long enough, you're going to have enough
+problems to iron out that you'll need to look behind most of the abstraction barriers,
+at least to understand what's going on, and possibly to change what's in there.
+
+If the goal is to understand the entire program to the greatest degree possible,
+then hiding code behind abstraction layers doesn't make that code go away; you'll
+still need to understand it eventually. (And in fact, in the short term, the pretense
+that you don't need to understand it now is likely to do a great deal of harm
+in the cases where you are wrong.)
+
+The ways in which object-oriented programming becomes complicated are many,
+and we just can't go into them too deeply here without going too far off the
+core topic of memory. Similarly, functional languages have their own set of
+games that they play, but we will skip those for now.
+
+
+VI. 
+
+If I'm saying all these things are bad, what's good?
+
+Good question. Let's start talking about things that are good -- but we'll have to
+show they are good by contrasting them with things that are bad.
+
+Let's take a typical situation of constructing a binary tree. C++ programmers
+and Computer Science Teachers tend to think binary trees are the canonical example
+of you should use a bunch of separately-allocated objects, because hey, you
+might delete a node, insert some other nodes.
+
+But often, these binary trees have known lifetimes: we're generating something
+that you will use and then be done with. In the example of the game that will
+ship with the compiler, we make BSP trees each frame for some of the light beam
+effects, and we know that we are going to render the geometry from these
+BSP trees, and then be done with it; the trees won't live past the end of the frame.
+
+To do this the C++ way, you have to make some kind of Node class, with a
+constructor, destructor, copy constructor, and whatever other methods are
+required. When building the tree, you 'new' each node on the heap separately,
+pointing them at each other. Calling 'new' all these times is pretty slow.
+When a node is removed from the tree, its
+destructor will recursively delete its children, which is also slow.
+
+But if you know a little bit about how the tree will be used, you can design
+something much simpler. For our single-frame BSP tree example, we know
+that after we have drawn the geometry to the screen, we don't need any
+of the nodes in the tree any more. We also know that the individual nodes
+don't hold any file handles or other weird 'resources'; they are just
+holding straightforward geometry data and pointing at each other.
+So when it comes time to reclaim the memory for the tree, we can just
+reclaim the entire tree at once, without recursively destructing a bunch
+of nodes. How? Well, you use an allocation strategy that allows you to do this.
+If everything related to the tree is stored in the same memory arena,
+you just reset the arena to the empty state, which is so fast it's basically
+free, regardless of the size of the tree that's in there. As a bonus,
+because we know we will never need to free individual nodes from the tree,
+the nodes can be allocated so quickly it's almost free, and they can be
+packed together more efficiently in memory, which means our cache utilization
+will be better.
+
+But I just placed a constraint that we can't free nodes until the end of the frame.
+What if we need to remove some nodes from the tree in the middle of processing
+the geometry? It's no big deal, we don't bother to deallocate them in any way,
+we just forget them as though we were using a garbage-collected language.
+Because the entire heap is going away at the end of the operation, we just don't
+have to worry. Yes, our amount of memory use during the interim time will be 
+slightly higher because we didn't free this thing; but if you take into account
+all the overheads required to run an efficient heap that re-uses deallocated
+memory, you'll find that for many applications we still come out ahead.
+
+
+VII.
+
+This language is designed to support this kind of bulk memory operation as the default;
+it doesn't help you very much if you want to do the recursive-node-destruct thing.
+(This language does not have destructors at all, and as for initializing nodes, we don't
+have constructors, just things that can initialize members to constant values without
+running arbitrary code.)
+
+By supporting bulk memory operations as standard conventions, we allow subroutines of
+your program, or libraries written by authors you don't know, to use these conventions
+in a coordinated fashion.
+
+If at all possible, it is cleanest and fastest to use statically-allocated data, or data
+that, once initialized, is never intended to be freed. But if you do want to use
+data with dynamic lifetimes, you can think of them as falling into one of the
+following four categories:
+
+(1) Extremely short-term use: We need to allocate something, but we'll be done with it
+by the end of this function.
+
+(2) Short-term use: Our program might need to use this computed result at various times,
+but there is a clear moment in the program when its lifetime is known to be over (for example,
+the end of the main loop in an interactive program).
+
+(3) Long-term use with well-defined ownership: We don't know when this memory can be freed,
+but it all belongs to the same computed result or is owned by the same subsystem and
+none is shared with anyone else, so perhaps freeing it can be very fast and easy 
+when the time comes.
+
+(4) Long-term use with poorly-defined ownership: Different portions of the program
+will choose to manually deallocate portions of this data at different times.
+So the data probably has to be separately allocated and separately deallocated,
+as you would be used to from C++.
+
+C++'s feature set suffers from the mistaken idea that all memory allocations fall into category 4,
+so most C++ programmers have to do the amount of programming required to support
+category 4, when really, they could be doing much less work.
+
+Because actually, in a
+well-written program, category 4 is very rare. In fact you might treat instances of
+category 4 as indicators of a probable design flaw, and that if you clean them up,
+maybe your program will become simpler and easier to debug and maintain.
+
+Category (1) above would be handled with something like alloca() from C.
+This language will eventually support alloca, but it doesn't currently.
+Right now we mostly treat categories 1 and 2 as the same thing; you can use
+Temporary_Storage for most cases of this. You can see how that works in
+012_temporary_storage.jai, but, to summarize, if you want to dynamically
+create a filename of unknown length from input strings, and use it, you can
+just pop off something like this:
+
+    open_file(tprint("/usr/local/%/sailorville/game_save_%.sav", username, save_index));
+
+We don't have to worry about managing the memory of the string at all;
+tprint creates a result in temporary storage, which will be automatically reclaimed later.
+This is the same convenience you get from a garbage-collected language, except it's
+tremendously faster, and actually more convenient because the exact lifetime
+of the string is explicit.
+
+Because everyone knows about Temporary_Storage, including libraries you may use,
+the author of a library can just return results like this without having to
+program any destructors or other memory management infrastructure, so long as 
+the use case is suitable for Temporary_Storage.
+
+For longer-term allocations, like case 3, we provide some other options.
+There's the Pool module distributed with the compiler, which gives you a
+very-fast-allocating memory arena. This module gives you a function of type
+Allocator, which is a standard type that can be used on any data structure 
+or in any procedure that expects it.
+
+Furthermore, the Context data structure, which gets passed implicitly to all procedures,
+contains a default allocator that you can override at any time. When any code,
+including code written by people you do not know, calls alloc(), alloc calls
+context.allocator to actually get the memory. So unlike C or C++, where 
+replacing malloc is a painful link-time operation, here it's dynamic and
+can be done cheaply at runtime as often as you want. 
+
+This means, if someone made a library that creates trees, you can just push
+a local allocator, call into that code, and, when it's done, you use the result
+then free all the memory in bulk, as discussed above.
+
+If the author of the library *expects* you to do this, he can get away with
+doing a lot less work. He can just 'leak' all his memory, but it's fine, because
+you will deallocate all of it in bulk.
+
+When your code is clean, most allocations will fall into categories 1 and 2 above,
+and you spend very little time thinking about freeing memory.
+
+There's another category of allocations, common in C++, that should properly not exist at all.
+For example, the kinds of allocations we discussed in part II, where an object
+has a pointer to another object, and uses 'new' to construct that object at startup, and deletes
+that object at shutdown. Instead of doing stuff like this, just store the inner data structure 
+by value inside the outer structure, and call an init function at startup. (If you need to
+call a shutdown function at shutdown, you can do that, but most code doesn't actually
+need something like this if memory is handled, because the usual purpose of a destructor
+is mainly to free memory!) 
+
+These wasteful allocations are side-effects of C++'s conflation of allocation and initialization.
+If you remove them, your code becomes lighter and faster.
+
+
+VIII.
+
+But, isn't it complicated to have to think about all these different categories
+of allocation, like 1-4 above? Doesn't it make programming more complicated?
+
+Actually, no, for several reasons. Firstly, just as with the library author above,
+you'll find that if you apply the bulk deallocation strategy to your own code,
+you'll just end up with a lot less code, and this gives you less to think about
+in the long run. And because your code will run faster naturally, you don't
+have to think as much about how to make it run fast.
+
+Also, factoring your program so that the data have clear lifetimes, i.e. fall into
+categories 1-3 instead of 4, will usually result in a program that's easier
+to understand and maintain. 
+
+Lastly, and perhaps more importantly, is the way the human mind works. We find it
+easy to think about concrete things, and harder to think about vague, abstract,
+uncertain things. This is a reality that has not been publicly acknowledged by
+computer science educational institutions or by the "best practices" espoused
+by industry. If you know exactly what code is supposed to be doing, including
+what the resource requirements look like, you can form a clear picture of this
+in your mind, and see what's a good idea, usage-wise. On the other hand,
+if everything is a vague fuzzy black box, you can't reason about very much at all,
+and you have to preemptively over-defend against all sorts of situations that
+in reality can't happen (but you don't know this), or do all kinds of redundant
+work that is unnecessary. This is one of the reasons that modern software
+is so very huge, lines-of-code-wise.
+
+
+Ultimately, doing things this way, you do have to think a little bit about
+what allocation strategy to use. It's never completely free. But it doesn't
+take very much thought, and in return you get better program organization
+and your software runs much faster, and you get to write a lot less code. So all together,
+it's a significant win over doing things the C++ way.
+
+
+IX.
+
+But isn't manual memory management error-prone?
+
+Isn't it extremely painful and hard to debug a program if you accidentally 
+use memory that's been freed, or free something twice,
+or free something using the wrong allocator?
+
+The current wave of programming languages, starting in the 1990s sometime,
+were all designed based on this assumption -- that manual memory management
+causes a lot of bugs, that those bugs are very painful, and that it's worth
+paying a huge cost to get rid of those problems. Thus the popularity of
+garbage-collected systems -- "garbage collectors can be just about as fast
+as C++," they say, "and it's much safer and saves you all the thinking,
+so this is obviously the future, and manual memory management is old".
+
+Well, the performance claim is untrue and those who make it are generally
+dishonest; even when they do get numbers that are anywhere close to a
+language like C++, it's for programs that treat all allocations as 
+category 4, which, as we've already said, is very inefficient. But as
+computers continue to change, and memory becomes increasingly expensive
+compared to CPU cycles, these claims just become increasingly false.
+
+But, when it comes to the ostensible pain of manual memory management
+mistakes, the people pushing garbage-collected languages were kind of right 
+for their time --
+the C compilers of the 70s and 80s were downright awful if you made a mistake
+along these lines -- but wrong objectively, because C compilers of today,
+exerting just a little effort to help you out, make it much easier
+and faster to track down these kinds of errors.
+
+Just a few basic techniques, built into the compiler and libraries,
+can help with these problems. If every allocator contains a debug mode
+that notices when something is freed twice, or notices when something is freed
+that does not belong to this allocator, it's easy to notice that a mistake
+has been made and report an exception, so that the user gets the exact
+call stack to the point where the mistaken free occurred. If allocators
+overwrite freed memory with a known pattern, it becomes easy to notice
+that you are using freed memory, and even know where that memory came from.
+(The Microsoft C++ runtime libraries have done this for a long time,
+and it's super helpful: when memory is freed from the heap, in debug mode,
+it gets overwritten with 0xcd; when memory is freed from the stack,
+it is overwritten by 0xcc. These bit patterns give you invalid pointers,
+and crazy integers and floats, so it's easy to see upon inspection 
+in the debugger that this thing was freed, and which of these places
+it lives).
+
+More advanced techniques can be built into the runtime library to enable
+you to track down problems. For example, because 64-bit operating systems
+have huge address spaces, you can turn on a debug allocator that puts
+every allocation on its own page, and unmaps those pages when the memory
+is freed, so that your program will instantly halt on a read of freed
+memory. And to catch bugs involving reading or writing too far past the
+end of a valid, live allocation, that library can put all such allocations
+at the end of a valid page, so that the next bytes after the valid area
+are the beginning of the next page, which is also unmapped. We don't yet
+provide such an allocator in the runtime library of this language, but it's
+on the roadmap; and when it's available, it becomes easy to substitute it
+for your whole program. 
+
+These techniques, along with others, gives you debugging functionality that
+C++ users today need to go through a substantial amount of friction to get,
+running a very slow instrumentation process on their code, so people don't
+do it very often (and many people don't do it at all, especially because
+the better tools cost money). And none of these techniques were in common
+practice during the 1970s and 1980s, when designers of today's languages
+"learned" what manual memory management is like.
+
+
+So, when it comes to the design of these modern garbage-collected languages,
+we have a situation where a tradeoff was made on a certain cost/benefit
+analysis: if we switch from manual memory management to automated management,
+we get a huge benefit because we get rid of all these super-painful problems,
+but the cost is low because garbage collection is very fast, so, it's an
+obvious win!
+
+The problem is, this analysis was wrong; the benefit is lower than they thought,
+because they were judging based on compilers and libraries that just weren't 
+putting in effort to help users with these problems; and the cost is higher
+than they thought, because GC is much slower than claimed, and also introduces
+semantic problems (if your data structure has a nontrivial finalizer
+('finalizers' are the GC'd language's version of destructors), you can be
+in for some rude surprises in terms of unpredictable program behavior.
+
+However, nobody is going back and honestly reassessing this cost/benefit
+analysis that took place in the 1990s, in part because most programmers today
+are young enough that they didn't see these choices happen or understand
+why they were made.
+
+
+Today, when we're trying to ship a large software project, working to get our bug list
+as close to 0 as possible, the percentage of our time that we spend figuring out
+memory bugs, rounded to the nearest digit, is 0%. It's just not an issue
+compared to the real problems we have, which are all about the fact that
+the software we ship has behavior that is very complex, and it's easy 
+to get some of that behavior wrong, and sometimes hard to reproduce the
+incorrect behavior. To deal with these kinds of bugs, you want your code
+to be as simple as possible, which, again, you can help by not crufting it down
+with all kinds of RAII and constructor/destructor stuff.
+
+People working in some of these other programming language paradigms are
+very concerned about "memory safety", and think that it's worth paying
+tremendous cost to prevent you from writing outside of valid allocation bounds
+and whatever. But what's really unsafe is when your program gets so big and complex
+that you don't understand it any more, and you enter a death spiral of 
+hiring more and more people to work on the code, so each person understands
+the code less and less well, so you need to hire even more, and meanwhile
+the quality of the code decreases, the average number of bugs increases
+over time, and the number of lines of code grows tremendously even though
+functionality doesn't increase very much, because you are hiring so many
+people, and what those people do all day is type more code, to add to the code base.
+
+This is the situation that plagues software development in the year 2020,
+and in terms of cost of the problem, is the biggest issue we should be focused
+on solving. We want our code to be without bugs, but we need this to happen
+in a way that keeps the code small, simple, and understandable by a small
+group of people, or by an individual.
+
+
+
+X.
+
+The design of these programming languages, that we've been getting since the 1990s,
+has ostensibly been to increase the efficiency of the programmer by giving that
+programmer higher-level expressive power, in part by removing the responsibility
+of managing memory. But, has this actually worked? If it has, then why when
+using these languages do we see ever-growing teams of programmers writing ever-bigger
+and more-complicated programs that don't actually do more than programs 
+written decades ago by teams that were much smaller?
+
+We need to figure out how to reverse this trend, and this programming language
+is one attempt to address one part of the problem.
+
+Here, the design of the system is meant to facilitate the writing of code
+that is fast, small, and simple, and to avoid failure modes that have been
+demonstrated by other programming language. For example, when writing C++ code,
+writing all these constructors and destructors, and making implementations
+and headers for these, and changing all these things every time functionality
+has changed -- programming starts to feel like filling out tax forms.
+You spend a great deal of time and effort navigating bureaucracy, and 
+relatively little of your time actually closing the distance to the solution
+of the actual problem.
+
+In today's functional languages, that descended from the Lisp family, a
+similar bureaucracy sets in, but there it comes from the type system.
+
+We know bureaucracy is soul-killing for those who live inside it.
+And zooming out, from a purely operational standpoint, we know that companies that
+become too beholden to their bureaucracies become mired in routine
+and find it very hard to make progress on things that are new and interesting.
+Those companies just keep drilling the same old mines until those mines are barren,
+then they die.
+But somehow we've decided that this is what programming should be like -- 
+ensconced in bureaucracy that tells you what to do at all times, not
+much room for choice or individual style. Programming languages are no
+longer designed for the enjoyment of individuals -- the primary concerns are,
+if you have a giant mass of not-very-skilled people building a project,
+how do you keep that program moderately intact while those people flail around
+inside it?
+
+That's an interesting thing to design for, sure, but it's a bleak picture of
+the future if all our languages are made for that scenario. Surely
+something else is possible?
+
+This language is designed for you, the individual. We expect you to enjoy
+that magical part of programming where the computer is made to do new and
+interesting functionality; we don't make you fill out income tax forms
+all day. Many software products are made by teams, but we see these teams
+as collections of individuals, each of whom has their own strengths and
+weaknesses, each of whom has their own personal style; we don't view
+a software project as a statistical combination of generic code typed
+by gray stone people who do not differ from each other.
+
+We have designed this language so that its basic functionality is 
+fast by default and simple by default. This leaves a lot of room
+for you to build your own personal style on what is here. If you do it the
+C++ way, where things start out slow because you have smart-pointered
+std::string all over the place calling copy constructors that then
+get maybe elided because you use std::move all the time, this is something
+that is slow by default and has to get very complicated in the pursuit
+of eventually being fast. We don't have to do that! Let's just make
+better choices to begin with!
+
+
+XI. Afterword - Examples
+
+This file so far has consisted of prose about relatively general ideas.
+It would probably be good to get concrete and show some code.
+So, here are some common memory usage patterns, along with
+the mechanisms implemented to help you out with them. When you put these together,
+they probably cover most of your allocation needs, and will result in a program
+that runs much faster, and contains much less boilerplate code, than the
+equivalent C++ program.
+
+(a) 
+
+If you just need to make a temporary string, like a filename, or a string
+label for something, then use 'tprint' for that: it's a version of print
+that automatically uses temporary storage. This string will remain valid
+until you call reset_temporary_storage:
+
+*/
+
+do_the_file_thing :: (index: int) {
+    data, success := read_entire_file(tprint("file_number_%", index));
+    
+    // The data allocated by tprint is in Temporary_Storage. We just forget about it,
+    // it's fine! The lifetime is much longer than we need.
+}
+
+/*
+(b)
+
+If you are adding stuff to an array so that you can pass those things to another
+function, or iterate over them,
+you can set the array's allocator to the temporary allocator, so that you 
+can forget about memory from then on. It looks like this:
+*/
+
+do_the_array_thing :: () {
+    array: [..] string;
+    array.allocator = temp;  // When this array resizes, it will use Temporary_Storage to get its memory.
+
+    // Add some arbitrary number of elements to the array;
+    // it will dynamically expand to hold these elements:
+    for i: 1..10 {
+        if i & 1  array_add(*array, tprint("odd number %", i));
+    }
+
+    // Because we never call an explicit 'free' on the elements of the array,
+    // we can do stuff that you couldn't do in a typical C++ scenario, like,
+    // just freely intermix static strings and dynamic strings, without
+    // paying any cost to copy the static strings:
+
+    array_add(*array, "Hello");
+    array_add(*array, "Sailor");
+
+    // The inability to do this with most other methods of handling memory
+    // espoused by other programming paradigms
+    // shows that a significant cost is being paid by these systems
+    // due to the loss of freedom that results.
+
+    
+    // Now we have an array of an arbitrary size, dynamically allocated,
+    // with the space for its elements located in Temporary_Storage.
+    // As long as we use it before we call reset_temporary_storage(),
+    // we're fine:
+    print_array(array);
+
+    // We never have to think about freeing the array, and the caller doesn't
+    // have to worry about taking ownership of it.
+}
+
+print_array :: (array: [] $T) {
+    print("Array contains % items:\n", array.count);
+
+    for array  print("[%] %\n", it_index, it);
+    
+    print("\n");
+}
+
+/*
+(c)
+
+If you want to make a function that returns arbitrary data structures,
+like trees, lists, or other allocated stuff,
+but you know that these things generally won't need to live a long time,
+you can also just make them in Temporary Storage. Note that if you do it this way,
+the caller doesn't get to choose the allocator, but if you are both the author
+and user of the code, this is fine and is often the simplest thing:
+
+*/
+
+Node :: struct {
+    value: int;
+    name: string;
+}
+
+make_a_node :: (value: int) -> *Node {
+    node := New(Node,, allocator=temp);
+
+    // 'New' is defined in modules/Basic. It just calls alloc and then the initializer.
+    // We are calling it with temp, so that the memory gets created
+    // in Temporary_Storage. To set the allocator we are using the special ,, notation,
+    // which sets context.allocator before the call, and resets it after the call.
+    // This will be documented more-thoroughly elsewhere.
+
+    // To make node.name, we don't need to explicitly use temp because
+    // we have a function tprint that already does that:
+    node.name  = tprint("Node with value %", value);
+    node.value = value;
+    
+    return node;  // Because the lifetime of temporarily-allocated stuff is long, we can return it!
+}
+
+/*
+
+(d)
+
+Suppose you are calling some function that gives you a result that is heap-allocated
+and needs to be freed, but you only need to use that thing right now in your current
+function -- say, to pass it somewhere else, then do a couple of things with the result.
+The 'defer' statement is very handy in these situations. For example:
+
+*/
+
+proc_that_uses_the_heap :: () -> [] int {
+    // Pretend we didn't write this and/or we don't want to change it right now.
+    // We also don't want to override the allocator from outside...
+
+    result: [..] int;
+    // Because we did not set 'allocator' on result, when it resizes,
+    // it will get memory from the default allocator, i.e. the heap.    
+
+    for 1..100 array_add(*result, it);
+
+    // So we return an array that is allocated on the heap.
+    return result;
+}
+
+example_of_using_defer :: () {
+    array := proc_that_uses_the_heap();
+    defer free(array.data);   // We say that we are going to free the array data right here, where we won't forget.
+    
+    for array  if (it / 10) == (it % 10) {
+        print("Palindrome number: %\n", it);
+    }
+
+    // Here, we can insert whatever other code we want
+    // that uses the array.
+    
+    // We don't have to do anything with the array to free it,
+    // since we registered the free when we acquired the value!
+}
+
+/*
+
+'defer' lets us just fire off the free and forget about it; it's very 
+light and easy. We don't need to do the very heavyweight C++ "RAII" thing
+about defining a class to hold the result just so that the class can 
+destruct at the end of the scope.
+
+
+(e) 
+
+As previously mentioned, this programming language is designed to make it easy for you
+to substitute allocators any time you want. So if you have code that's in category (3)
+with regard to allocation, you can just write it so that it doesn't bother freeing
+anything, and tell the user that they should push an allocator before calling the code,
+and bulk-free the memory when done.
+
+Here we'll use the Pool allocator to call a routine that just does a bunch of allocation,
+then we'll release it all in one go.
+
+*/
+
+
+Messy_Struct :: struct {
+    name: string;        // Dynamically allocated, maybe.
+
+    values: [..] float;  // Also dynamically allocated.
+}
+
+messy_routine :: () -> [] *Messy_Struct {
+    result: [..] *Messy_Struct;
+    // This is bad, as the Messy_Structs should probably be stored in the array by value,
+    // for reasons discussed in part III! But, this is supposed to be a messy routine.
+
+    
+    for i: 0..9 {
+        s := New(Messy_Struct);  // Since we didn't pass an allocator argument to New, it allocates from context.allocator.
+
+        if i == 0 {
+            s.name = sprint("Struct Number %", i);  // sprint allocates from context.allocator!
+        } else {
+            s.name = sprint("Struct Number %, which is after '%'", i, result[i-1].name);
+        }
+
+        for j: 0..i {
+            array_add(*s.values, cast(float) j*j);  // This will cause the array to dynamically allocate from context.allocator.
+        }
+
+        array_add(*result, s);  // And 'result' itself will have storage for its elements allocated from context.allocator.
+    }
+
+    // We are not going to worry about freeing any memory, or about who owns what memory.
+    // The caller will just call us with an appropriate allocator.
+    return result;
+}
+
+call_the_messy_routine :: () {
+    pool: Pool;
+
+
+    print("Calling the Messy Routine:\n");
+    print("\n");
+    
+    // Set up a new context for the code we're calling into. Right now
+    // we're only overriding the allocator, but we could do other stuff, too.
+    new_context := context;
+    new_context.allocator.proc = pool_allocator_proc;
+    new_context.allocator.data = *pool;
+
+    // We set_allocators on Pool so that it can copy them from context.allocator.
+    // If we only use the Pool after we have pushed the Pool itself, it will have
+    // nowhere to get its backing memory from. This is a standard part of using
+    // Pool; see the documentation for details.
+    set_allocators(*pool);
+    
+    push_context new_context {
+        // Everything in here uses the pool allocator!
+        array := messy_routine();
+
+        // If we used print_array we'd just see a bunch of pointer addresses,
+        // because we put pointers in our array. So let's make a loop:
+        for array  print("messy_struct[%] is %\n", it_index, << it);
+    }
+
+
+    print("After the Messy Routine, the Pool contains % bytes.\n", pool.memblock_size - pool.bytes_left);
+    print("Releasing the pool now.\n");
+    print("\n");
+    release(*pool);  // Free all the memory allocated by messy_routine.
+
+    // In order to make this nice pattern happen, we did need to do a few lines of setup
+    // involving the Pool and pushing the context. But note that this setup is constant,
+    // regardless of the size of messy_routine, how much data it returns, or how many
+    // data types it deals with. We never need to change this outer code, or add more
+    // memory handling.
+
+    // Contrast this with the C++ approach, where every data type handled by messy_routine
+    // would need to have a destructor, and every time we add a data type, it needs to
+    // have yet another destructor.
+}
+
+/*
+
+(f)
+
+You can also do the inverse pattern of (e): If you are writing a fairly large subsystem
+that performs lots of memory operations, you could have that subsystem push its own allocator
+on every entry point, so that the caller doesn't have to worry about it.
+
+Not only is this also better, in terms of not having to write lots of destructor code,
+it also means you're likely to have substantially better memory locality, which leads
+to better cache performance of the code in that subsystem. (Not just the code that allocates
+memory, but the code that uses that memory later on!) 
+
+*/
+
+
+//
+// And, here's our main program that calls the code above.
+// Thanks for reading!
+//
+
+main :: () {
+    do_the_file_thing(42);
+
+    do_the_array_thing();
+    
+    node := make_a_node(20);
+    print("node is: %\n", << node);
+    print("\n");
+    
+    example_of_using_defer();
+
+    print("\n");
+    
+    call_the_messy_routine();
+
+    // If we were looping, we should call reset_temporary_storage to clean up.
+    // Since we are not looping, this doesn't matter, but it's an example, so
+    // let's do it!
+    reset_temporary_storage();
+}
+
+#import "Basic";
+#import "File";
+#import "Pool";
