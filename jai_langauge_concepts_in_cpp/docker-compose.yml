@@ -1,0 +1,22 @@
+version: "3.9"
+
+services:
+  jai_language_concepts_in_cpp:
+    build: ./
+    container_name: jai_language_concepts_in_cpp
+    networks:
+      localnet:
+        ipv4_address: 172.30.0.42
+    ports:
+      - 8082:443
+      - 8086:8086
+    tty: true
+    volumes:
+      - ./dev:/root/dev
+
+networks:
+  localnet:
+    ipam:
+       driver: default
+       config:
+         - subnet: 172.30.0.0/16
